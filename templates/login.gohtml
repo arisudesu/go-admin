@@ -1,0 +1,24 @@
+{{ template "header.gohtml" . }}
+
+<main class="my-auto p-4">
+    <div class="container" style="width: 350px">
+
+        <h1>Admin UI</h1>
+        <form method="post">
+            <div class="form-floating mb-3">
+                <input type="text" class="form-control" id="username" placeholder="Логин" name="username" value="{{ .Username }}">
+                <label for="username">Логин</label>
+            </div>
+
+            <div class="form-floating mb-3">
+                <input type="password" class="form-control" id="password" name="password" placeholder="Пароль">
+                <label for="password">Пароль</label>
+            </div>
+
+            <button type="submit" class="btn btn-primary">Вход</button>
+        </form>
+
+    </div>
+</main>
+
+{{ template "footer.gohtml" . }}
