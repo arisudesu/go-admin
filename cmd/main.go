@@ -4,76 +4,71 @@ import (
 	"html/template"
 	"log"
 	"net/http"
-	"path"
 
 	"github.com/gorilla/mux"
-	"github.com/pkg/errors"
 
-	"github.com/arisudesu/go-admin/cmd/handler"
-	"github.com/arisudesu/go-admin/cmd/handler/index"
-	"github.com/arisudesu/go-admin/cmd/handler/login"
-	"github.com/arisudesu/go-admin/cmd/handler/logout"
+	"github.com/arisudesu/go-admin/cmd/web"
+	"github.com/arisudesu/go-admin/cmd/web/index"
+	"github.com/arisudesu/go-admin/cmd/web/login"
+	"github.com/arisudesu/go-admin/cmd/web/logout"
 )
 
-const Version = "0.1.0"
-
-func init() {
-	log.SetFlags(log.LstdFlags | log.Lshortfile | log.Lmicroseconds)
-}
-
 func main() {
-	// Initialize templates and html handler
-
-	var resolver interface{ Get(string) *mux.Route }
-
-	resolveUrl := func(name string, args ...string) string {
-		url, err := resolver.Get(name).URL(args...)
-		if err != nil {
-			panic(err)
-		}
-		return url.String()
-	}
-
-	tmplFuncs := template.FuncMap{
-		"url": resolveUrl,
-	}
-
-	tmpl, err := template.
-		New("__templates__").Funcs(tmplFuncs).
-		ParseGlob(path.Join("templates", "*.gohtml"))
-	if err != nil {
-		log.Fatal(errors.WithStack(err))
-	}
-
-	ctxAddVersion := func(r *http.Request, ctx handler.HtmlCtx) { ctx["Version"] = Version }
-
-	htmlHandler := handler.NewHtmlHandler(tmpl)
-	htmlHandler.Use(ctxAddVersion)
-
-	// Build front router and middleware
-
-	loggerMw := handler.NewLoggerMiddleware()
-
-	reqAuthMw := handler.NewRequireAuthMiddleware(
-		func(r *http.Request) bool { return r.URL.Path == resolveUrl("login") },
-		resolveUrl,
-	)
+	// Initialize router and url generator very early.
+	// We need them available in template functions.
 
 	router := mux.NewRouter()
-	router.Use(loggerMw, reqAuthMw)
+	urlgen := web.NewURLGenerator(router)
 
-	// Register routes wrapped with middleware
+	// Initialize templates, providing function to generate urls from the router.
 
-	root := router.PathPrefix("/").Subrouter()
-	root.NotFoundHandler = handler.NewNotFoundHandler(htmlHandler)
+	tmplFuncs := template.FuncMap{
+		"url": urlgen.Generate,
+	}
 
-	root.Handle("/", index.NewHandler(htmlHandler)).Name("index")
-	root.Handle("/login/", login.NewHandler(htmlHandler, resolveUrl)).Name("login")
-	root.Handle("/logout/", logout.NewHandler(htmlHandler, resolveUrl)).Name("logout")
+	templates := template.New("").Funcs(tmplFuncs)
 
-	resolver = root
+	// Load templates recursively using our recursive loader.
 
-	// Build std mux with front router and assets
+	if err := web.LoadTemplates(templates, "templates", "*.gohtml"); err != nil {
+		log.Fatal(err)
+	}
+
+	// Initialize html handler that is able to render responses from these templates.
+	// Provide to it context processors which extend render context with useful info.
+
+	ctxAddVersion := func(r *http.Request, ctx web.HtmlCtx) { ctx["Version"] = version }
+	ctxAddRequest := func(r *http.Request, ctx web.HtmlCtx) { ctx["Request"] = r }
+
+	htmlHandler := web.NewHtmlHandler(
+		templates,
+		ctxAddVersion,
+		ctxAddRequest,
+	)
+
+	// Setup application middlewares and route handles.
+
+	loggingMw := web.NewLoggingMiddleware()
+	reqAuthMw := web.NewRequireAuthMiddleware(
+		urlgen, func(r *http.Request) bool { return r.URL.Path == urlgen.Generate("login") },
+	)
+
+	router.Use(loggingMw)
+	router.Use(reqAuthMw)
+
+	router.Handle("/", index.Handler(htmlHandler)).Name("index")
+	router.Handle("/login/", login.Handler(htmlHandler, urlgen)).Name("login")
+	router.Handle("/logout/", logout.Handler(urlgen)).Name("logout")
+
+	// Register NotFoundHandler after all other handlers, see issue:
+	// https://github.com/gorilla/mux/issues/416#issuecomment-600074549.
+	// This forces router to execute middlewares before NotFoundHandler.
+
+	router.NotFoundHandler = router.NewRoute().Handler(
+		web.NewNotFoundHandler(htmlHandler)).GetHandler()
+
+	// Build std mux, mount page router, assets and favicon to it.
+	// This is the lowest level of request processing chain in app.
 
 	assetsHandler := http.FileServer(http.Dir("assets"))
 

@@ -1,4 +1,4 @@
-package handler
+package web
 
 import (
 	"bytes"
@@ -7,6 +7,14 @@ import (
 	"net/http"
 
 	"github.com/pkg/errors"
+)
+
+const (
+	tplError404 = "error404.gohtml"
+	tplError500 = "error500.gohtml"
+
+	contentTypeHeader = "Content-Type"
+	contentTypeHtml   = "text/html; charset=utf-8"
 )
 
 type HtmlHandler struct {
@@ -26,16 +34,14 @@ func (fn HtmlCtxProcFunc) Process(r *http.Request, ctx HtmlCtx) {
 
 type HtmlCtx map[string]any
 
-func NewHtmlHandler(template *template.Template) *HtmlHandler {
-	return &HtmlHandler{
+func NewHtmlHandler(template *template.Template, prf ...HtmlCtxProcFunc) *HtmlHandler {
+	h := &HtmlHandler{
 		template: template,
 	}
-}
-
-func (h *HtmlHandler) Use(prf ...HtmlCtxProcFunc) {
 	for _, fn := range prf {
 		h.processors = append(h.processors, fn)
 	}
+	return h
 }
 
 func (h *HtmlHandler) Success(w http.ResponseWriter, r *http.Request, template string, ctx HtmlCtx) {
@@ -49,11 +55,11 @@ func (h *HtmlHandler) Success(w http.ResponseWriter, r *http.Request, template s
 	buf, err := h.render(template, ctx)
 	if err != nil {
 		log.Printf("Error rendering %s: %+v", template, errors.WithStack(err))
-		h.error500(w, r)
+		h.error500(w)
 		return
 	}
 
-	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	w.Header().Set(contentTypeHeader, contentTypeHtml)
 	w.WriteHeader(http.StatusOK)
 	if _, err := w.Write(buf); err != nil {
 		log.Printf("Error writing response: %+v", errors.WithStack(err))
@@ -66,14 +72,14 @@ func (h *HtmlHandler) NotFound(w http.ResponseWriter, r *http.Request) {
 		fn.Process(r, ctx)
 	}
 
-	buf, err := h.render("error404.gohtml", ctx)
+	buf, err := h.render(tplError404, ctx)
 	if err != nil {
-		log.Printf("Error rendering error404.gohtml: %+v", errors.WithStack(err))
-		h.error500(w, r)
+		log.Printf("Error rendering %s: %+v", tplError404, errors.WithStack(err))
+		h.error500(w)
 		return
 	}
 
-	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	w.Header().Set(contentTypeHeader, contentTypeHtml)
 	w.WriteHeader(http.StatusNotFound)
 	if _, err := w.Write(buf); err != nil {
 		log.Printf("Error writing response: %+v", errors.WithStack(err))
@@ -81,7 +87,8 @@ func (h *HtmlHandler) NotFound(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *HtmlHandler) Error(w http.ResponseWriter, r *http.Request, err error) {
-	h.error500(w, r)
+	log.Printf("Handler error: %+v", err)
+	h.error500(w)
 }
 
 func (h *HtmlHandler) render(template string, ctx HtmlCtx) ([]byte, error) {
@@ -92,16 +99,16 @@ func (h *HtmlHandler) render(template string, ctx HtmlCtx) ([]byte, error) {
 	return buf.Bytes(), nil
 }
 
-func (h *HtmlHandler) error500(w http.ResponseWriter, r *http.Request) {
-	buf, err := h.render("error500.gohtml", nil)
+func (h *HtmlHandler) error500(w http.ResponseWriter) {
+	buf, err := h.render(tplError500, nil)
 	if err != nil {
-		log.Printf("Error rendering error500.gohtml: %+v", errors.WithStack(err))
+		log.Printf("Error rendering %s: %+v", tplError500, errors.WithStack(err))
 		w.WriteHeader(http.StatusInternalServerError)
 		return
 	}
 
-	w.Header().Set("Content-Type", "text/html; charset=utf-8")
-	w.WriteHeader(500)
+	w.Header().Set(contentTypeHeader, contentTypeHtml)
+	w.WriteHeader(http.StatusInternalServerError)
 	if _, err := w.Write(buf); err != nil {
 		log.Printf("Error writing response: %+v", errors.WithStack(err))
 	}

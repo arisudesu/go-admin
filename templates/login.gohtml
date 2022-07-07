@@ -5,8 +5,18 @@
 
         <h1>Admin UI</h1>
         <form method="post">
+            {{ if .Error }}
+                <div class="alert alert-warning d-flex align-items-center">
+                    <div>{{ .Error }}</div>
+                    <div class="flex-shrink-0 ms-2">
+                        <i class="bi bi-exclamation-triangle-fill"></i>
+                    </div>
+                </div>
+            {{ end }}
+
             <div class="form-floating mb-3">
-                <input type="text" class="form-control" id="username" placeholder="Логин" name="username" value="{{ .Username }}">
+                <input type="text" class="form-control" id="username" placeholder="Логин" name="username"
+                       value="{{ .Username }}">
                 <label for="username">Логин</label>
             </div>
 
